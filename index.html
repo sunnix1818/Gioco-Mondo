@@ -2,7 +2,7 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8" />
-<title>Mappa del Mondo</title>
+<title>Mappa del Mondo – Strategia</title>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://unpkg.com/topojson@3"></script>
@@ -11,7 +11,7 @@
 html, body {
     margin: 0;
     padding: 0;
-    background: #1e3a8a;
+    background: #0f172a;
     overflow: hidden;
 }
 canvas {
@@ -21,11 +21,11 @@ canvas {
     position: fixed;
     bottom: 10px;
     left: 10px;
-    background: rgba(0,0,0,0.6);
+    background: rgba(0,0,0,0.7);
     color: white;
-    padding: 8px 12px;
-    font-family: sans-serif;
-    border-radius: 6px;
+    padding: 8px 14px;
+    font-family: system-ui, sans-serif;
+    border-radius: 8px;
 }
 </style>
 </head>
@@ -33,7 +33,7 @@ canvas {
 <body>
 
 <canvas id="map"></canvas>
-<div id="label">Clicca una nazione</div>
+<div id="label">Passa il mouse su una nazione</div>
 
 <script>
 const canvas = document.getElementById("map");
@@ -47,15 +47,31 @@ function resize() {
 resize();
 window.addEventListener("resize", () => {
     resize();
+    projection.fitSize(
+        [canvas.width, canvas.height],
+        { type: "FeatureCollection", features: countries }
+    );
     draw();
 });
 
-// PROIEZIONE (QUESTO ERA IL PROBLEMA)
+// PROIEZIONE
 const projection = d3.geoMercator();
 const path = d3.geoPath(projection, ctx);
 
 let countries = [];
+let hovered = null;
+let selected = null;
 
+// colore stabile per nazione
+function colorFor(id) {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) {
+        h = id.charCodeAt(i) + ((h << 5) - h);
+    }
+    return `hsl(${h % 360},60%,55%)`;
+}
+
+// CARICAMENTO MAPPA
 fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
 .then(r => r.json())
 .then(world => {
@@ -67,41 +83,64 @@ fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
     );
 
     draw();
-})
-.catch(err => console.error(err));
+});
 
+// DISEGNO
 function draw() {
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
     // mare
-    ctx.fillStyle = "#1e3a8a";
+    ctx.fillStyle = "#1e293b";
     ctx.fillRect(0,0,canvas.width,canvas.height);
-
-    if (!countries.length) return;
-
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 0.5;
 
     countries.forEach(c => {
         ctx.beginPath();
         path(c);
-        ctx.fillStyle = "#3b82f6";
+
+        ctx.fillStyle = colorFor(c.id);
         ctx.fill();
+
+        ctx.strokeStyle = "#020617";
+        ctx.lineWidth = 0.4;
         ctx.stroke();
+
+        if (c === hovered) {
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        if (c === selected) {
+            ctx.strokeStyle = "#facc15";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
     });
 }
 
-// CLICK SULLE NAZIONI
-canvas.addEventListener("click", e => {
-    const [x, y] = [e.offsetX, e.offsetY];
+// HOVER
+canvas.addEventListener("mousemove", e => {
+    const [x,y] = [e.offsetX, e.offsetY];
+    hovered = null;
 
     for (let c of countries) {
         ctx.beginPath();
         path(c);
         if (ctx.isPointInPath(x,y)) {
+            hovered = c;
             label.textContent = "Nazione ID: " + c.id;
-            return;
+            break;
         }
+    }
+    draw();
+});
+
+// CLICK
+canvas.addEventListener("click", () => {
+    if (hovered) {
+        selected = hovered;
+        label.textContent = "Selezionata: " + selected.id;
+        draw();
     }
 });
 </script>

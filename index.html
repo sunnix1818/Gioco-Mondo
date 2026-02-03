@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Mappa del Mondo – Confini cliccabili</title>
+<style>
+    html, body {
+        margin: 0;
+        padding: 0;
+        background: #111;
+        overflow: hidden;
+    }
+    canvas {
+        display: block;
+    }
+    #label {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 20px;
+        background: rgba(0,0,0,0.7);
+        color: white;
+        font-family: Arial, sans-serif;
+        font-size: 18px;
+        border-radius: 8px;
+        pointer-events: none;
+    }
+</style>
+</head>
+<body>
+
+<canvas id="map"></canvas>
+<div id="label">Clicca una nazione</div>
+
+<script>
+const canvas = document.getElementById("map");
+const ctx = canvas.getContext("2d");
+const label = document.getElementById("label");
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    draw();
+}
+window.addEventListener("resize", resize);
+resize();
+
+let countries = [];
+
+// 🔗 GEOJSON MONDIALE AFFIDABILE
+const GEOJSON_URL =
+"https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson";
+
+fetch(GEOJSON_URL)
+    .then(r => r.json())
+    .then(data => {
+        countries = data.features.filter(f => f.geometry && f.properties);
+        draw();
+    });
+
+// proiezione semplice (equirettangolare)
+function project(lon, lat) {
+    return [
+        (lon + 180) / 360 * canvas.width,
+        (90 - lat) / 180 * canvas.height
+    ];
+}
+
+function drawCountry(feature) {
+    const geom = feature.geometry;
+    ctx.beginPath();
+
+    const drawPolygon = (coords) => {
+        coords.forEach((ring) => {
+            ring.forEach(([lon, lat], i) => {
+                const [x, y] = project(lon, lat);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            });
+            ctx.closePath();
+        });
+    };
+
+    if (geom.type === "Polygon") {
+        drawPolygon(geom.coordinates);
+    } else if (geom.type === "MultiPolygon") {
+        geom.coordinates.forEach(drawPolygon);
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#1e3a8a";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    countries.forEach(c => {
+        drawCountry(c);
+        ctx.fillStyle = "#3b82f6";
+        ctx.fill();
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    });
+}
+
+// HIT TEST (click su nazione)
+canvas.addEventListener("click", e => {
+    const x = e.offsetX;
+    const y = e.offsetY;
+
+    for (let i = countries.length - 1; i >= 0; i--) {
+        const c = countries[i];
+        ctx.beginPath();
+        drawCountry(c);
+        if (ctx.isPointInPath(x, y)) {
+            const name =
+                c.properties.ADMIN ||
+                c.properties.NAME ||
+                "Nazione sconosciuta";
+            label.textContent = name;
+            return;
+        }
+    }
+});
+</script>
+
+</body>
+</html>

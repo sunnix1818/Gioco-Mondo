@@ -49,60 +49,113 @@ resize();
 let countries = [];
 
 // 🔗 GEOJSON MONDIALE AFFIDABILE
-const GEOJSON_URL =
-"https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson";
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/topojson@3"></script>
 
-fetch(GEOJSON_URL)
-    .then(r => r.json())
-    .then(data => {
-        countries = data.features.filter(f => f.geometry && f.properties);
-        draw();
-    });
+<script>
+const canvas = document.getElementById("map");
+const ctx = canvas.getContext("2d");
+const label = document.getElementById("label");
 
-// proiezione semplice (equirettangolare)
-function project(lon, lat) {
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    draw();
+}
+window.addEventListener("resize", resize);
+resize();
+
+let countries = [];
+
+const TOPO_URL =
+"https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
+
+Promise.all([
+    fetch(TOPO_URL).then(r => r.json())
+]).then(([world]) => {
+    const geo = topojson.feature(world, world.objects.countries);
+    countries = geo.features;
+    draw();
+}).catch(err => {
+    console.error("ERRORE CARICAMENTO MAPPA", err);
+});
+
+function project([lon, lat]) {
     return [
         (lon + 180) / 360 * canvas.width,
         (90 - lat) / 180 * canvas.height
     ];
 }
 
-function drawCountry(feature) {
-    const geom = feature.geometry;
-    ctx.beginPath();
-
-    const drawPolygon = (coords) => {
-        coords.forEach((ring) => {
-            ring.forEach(([lon, lat], i) => {
-                const [x, y] = project(lon, lat);
-                if (i === 0) ctx.moveTo(x, y);
-                else ctx.lineTo(x, y);
-            });
-            ctx.closePath();
-        });
-    };
-
-    if (geom.type === "Polygon") {
-        drawPolygon(geom.coordinates);
-    } else if (geom.type === "MultiPolygon") {
-        geom.coordinates.forEach(drawPolygon);
-    }
-}
-
 function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#1e3a8a";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    countries.forEach(c => {
-        drawCountry(c);
+    // oceano
+    ctx.fillStyle = "#1e3a8a";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+
+    if (!countries.length) return;
+
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 0.5;
+
+    countries.forEach(f => {
+        const geom = f.geometry;
+        ctx.beginPath();
+
+        const drawPoly = poly => {
+            poly.forEach(ring => {
+                ring.forEach((p,i) => {
+                    const [x,y] = project(p);
+                    if(i===0) ctx.moveTo(x,y);
+                    else ctx.lineTo(x,y);
+                });
+                ctx.closePath();
+            });
+        };
+
+        if (geom.type === "Polygon") drawPoly(geom.coordinates);
+        if (geom.type === "MultiPolygon")
+            geom.coordinates.forEach(drawPoly);
+
         ctx.fillStyle = "#3b82f6";
         ctx.fill();
-        ctx.strokeStyle = "#000";
-        ctx.lineWidth = 1;
         ctx.stroke();
     });
 }
+
+// click
+canvas.addEventListener("click", e => {
+    const x = e.offsetX;
+    const y = e.offsetY;
+
+    for (let i = countries.length-1; i>=0; i--) {
+        ctx.beginPath();
+        const geom = countries[i].geometry;
+
+        const drawPoly = poly => {
+            poly.forEach(ring => {
+                ring.forEach((p,j) => {
+                    const [px,py] = project(p);
+                    if(j===0) ctx.moveTo(px,py);
+                    else ctx.lineTo(px,py);
+                });
+                ctx.closePath();
+            });
+        };
+
+        if (geom.type==="Polygon") drawPoly(geom.coordinates);
+        if (geom.type==="MultiPolygon")
+            geom.coordinates.forEach(drawPoly);
+
+        if (ctx.isPointInPath(x,y)) {
+            label.textContent = "Nazione selezionata";
+            return;
+        }
+    }
+});
+</script>
+
 
 // HIT TEST (click su nazione)
 canvas.addEventListener("click", e => {

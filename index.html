@@ -1,33 +1,35 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="UTF-8">
-<title>Mappa del Mondo – Confini cliccabili</title>
+<meta charset="UTF-8" />
+<title>Mappa del Mondo</title>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/topojson@3"></script>
+
 <style>
-    html, body {
-        margin: 0;
-        padding: 0;
-        background: #111;
-        overflow: hidden;
-    }
-    canvas {
-        display: block;
-    }
-    #label {
-        position: absolute;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 10px 20px;
-        background: rgba(0,0,0,0.7);
-        color: white;
-        font-family: Arial, sans-serif;
-        font-size: 18px;
-        border-radius: 8px;
-        pointer-events: none;
-    }
+html, body {
+    margin: 0;
+    padding: 0;
+    background: #1e3a8a;
+    overflow: hidden;
+}
+canvas {
+    display: block;
+}
+#label {
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.6);
+    color: white;
+    padding: 8px 12px;
+    font-family: sans-serif;
+    border-radius: 6px;
+}
 </style>
 </head>
+
 <body>
 
 <canvas id="map"></canvas>
@@ -41,56 +43,37 @@ const label = document.getElementById("label");
 function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    draw();
 }
-window.addEventListener("resize", resize);
 resize();
-
-let countries = [];
-
-// 🔗 GEOJSON MONDIALE AFFIDABILE
-<script src="https://d3js.org/d3.v7.min.js"></script>
-<script src="https://unpkg.com/topojson@3"></script>
-
-<script>
-const canvas = document.getElementById("map");
-const ctx = canvas.getContext("2d");
-const label = document.getElementById("label");
-
-function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+window.addEventListener("resize", () => {
+    resize();
     draw();
-}
-window.addEventListener("resize", resize);
-resize();
-
-let countries = [];
-
-const TOPO_URL =
-"https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
-
-Promise.all([
-    fetch(TOPO_URL).then(r => r.json())
-]).then(([world]) => {
-    const geo = topojson.feature(world, world.objects.countries);
-    countries = geo.features;
-    draw();
-}).catch(err => {
-    console.error("ERRORE CARICAMENTO MAPPA", err);
 });
 
-function project([lon, lat]) {
-    return [
-        (lon + 180) / 360 * canvas.width,
-        (90 - lat) / 180 * canvas.height
-    ];
-}
+// PROIEZIONE (QUESTO ERA IL PROBLEMA)
+const projection = d3.geoMercator();
+const path = d3.geoPath(projection, ctx);
+
+let countries = [];
+
+fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
+.then(r => r.json())
+.then(world => {
+    countries = topojson.feature(world, world.objects.countries).features;
+
+    projection.fitSize(
+        [canvas.width, canvas.height],
+        { type: "FeatureCollection", features: countries }
+    );
+
+    draw();
+})
+.catch(err => console.error(err));
 
 function draw() {
     ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    // oceano
+    // mare
     ctx.fillStyle = "#1e3a8a";
     ctx.fillRect(0,0,canvas.width,canvas.height);
 
@@ -99,79 +82,24 @@ function draw() {
     ctx.strokeStyle = "#000";
     ctx.lineWidth = 0.5;
 
-    countries.forEach(f => {
-        const geom = f.geometry;
+    countries.forEach(c => {
         ctx.beginPath();
-
-        const drawPoly = poly => {
-            poly.forEach(ring => {
-                ring.forEach((p,i) => {
-                    const [x,y] = project(p);
-                    if(i===0) ctx.moveTo(x,y);
-                    else ctx.lineTo(x,y);
-                });
-                ctx.closePath();
-            });
-        };
-
-        if (geom.type === "Polygon") drawPoly(geom.coordinates);
-        if (geom.type === "MultiPolygon")
-            geom.coordinates.forEach(drawPoly);
-
+        path(c);
         ctx.fillStyle = "#3b82f6";
         ctx.fill();
         ctx.stroke();
     });
 }
 
-// click
+// CLICK SULLE NAZIONI
 canvas.addEventListener("click", e => {
-    const x = e.offsetX;
-    const y = e.offsetY;
+    const [x, y] = [e.offsetX, e.offsetY];
 
-    for (let i = countries.length-1; i>=0; i--) {
+    for (let c of countries) {
         ctx.beginPath();
-        const geom = countries[i].geometry;
-
-        const drawPoly = poly => {
-            poly.forEach(ring => {
-                ring.forEach((p,j) => {
-                    const [px,py] = project(p);
-                    if(j===0) ctx.moveTo(px,py);
-                    else ctx.lineTo(px,py);
-                });
-                ctx.closePath();
-            });
-        };
-
-        if (geom.type==="Polygon") drawPoly(geom.coordinates);
-        if (geom.type==="MultiPolygon")
-            geom.coordinates.forEach(drawPoly);
-
+        path(c);
         if (ctx.isPointInPath(x,y)) {
-            label.textContent = "Nazione selezionata";
-            return;
-        }
-    }
-});
-</script>
-
-
-// HIT TEST (click su nazione)
-canvas.addEventListener("click", e => {
-    const x = e.offsetX;
-    const y = e.offsetY;
-
-    for (let i = countries.length - 1; i >= 0; i--) {
-        const c = countries[i];
-        ctx.beginPath();
-        drawCountry(c);
-        if (ctx.isPointInPath(x, y)) {
-            const name =
-                c.properties.ADMIN ||
-                c.properties.NAME ||
-                "Nazione sconosciuta";
-            label.textContent = name;
+            label.textContent = "Nazione ID: " + c.id;
             return;
         }
     }

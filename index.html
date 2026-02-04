@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="UTF-8" />
-<title>Mappa Strategica</title>
+<meta charset="UTF-8">
+<title>World Strategy – Hex Nations</title>
 
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <script src="https://unpkg.com/topojson@3"></script>
@@ -13,23 +13,19 @@ html, body {
     padding: 0;
     background: #020617;
     overflow: hidden;
-    font-family: system-ui, sans-serif;
 }
 canvas {
     display: block;
 }
-#ui {
+#info {
     position: fixed;
-    top: 10px;
+    bottom: 10px;
     left: 10px;
-    background: rgba(0,0,0,0.7);
+    background: rgba(0,0,0,0.8);
     color: white;
-    padding: 10px 14px;
-    border-radius: 10px;
-}
-#label {
-    margin-top: 6px;
-    font-size: 14px;
+    font-family: system-ui, sans-serif;
+    padding: 8px 14px;
+    border-radius: 8px;
 }
 </style>
 </head>
@@ -37,174 +33,180 @@ canvas {
 <body>
 
 <canvas id="map"></canvas>
-
-<div id="ui">
-    <div id="time"></div>
-    <div id="label">Muovi il mouse</div>
-</div>
+<div id="info">Caricamento mappa…</div>
 
 <script>
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
-const label = document.getElementById("label");
-const timeBox = document.getElementById("time");
+const info = document.getElementById("info");
 
-// ---- TEMPO ----
-let day = 1, month = 1, year = 1800;
-function tickTime() {
-    day++;
-    if (day > 30) { day = 1; month++; }
-    if (month > 12) { month = 1; year++; }
-    timeBox.textContent = `📅 ${day}/${month}/${year}`;
-}
-setInterval(tickTime, 1000);
-tickTime();
-
-// ---- CANVAS ----
 function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 }
 resize();
-window.addEventListener("resize", () => {
-    resize();
-    projection.fitSize(
-        [canvas.width, canvas.height],
-        { type: "FeatureCollection", features: countries }
-    );
-    draw();
-});
+window.addEventListener("resize", resize);
 
-// ---- PROIEZIONE + ZOOM ----
+// CAMERA
+let scale = 1;
+let offsetX = 0;
+let offsetY = 0;
+let dragging = false;
+let lastX = 0;
+let lastY = 0;
+
+// MAPPA
 const projection = d3.geoMercator();
 const path = d3.geoPath(projection, ctx);
 
-const zoom = d3.zoom()
-    .scaleExtent([0.8, 8])
-    .on("zoom", e => {
-        ctx.setTransform(
-            e.transform.k, 0, 0,
-            e.transform.k,
-            e.transform.x,
-            e.transform.y
-        );
-        draw();
-    });
-
-d3.select(canvas).call(zoom);
-
-// ---- DATI ----
 let countries = [];
-let hovered = null;
-let selected = null;
+let hexes = [];
+let selectedHex = null;
 
-// ID → NOME (base, espandibile)
-const COUNTRY_NAMES = {
-    "250": "Francia",
-    "380": "Italia",
-    "276": "Germania",
-    "724": "Spagna",
-    "826": "Regno Unito",
-    "840": "Stati Uniti",
-    "643": "Russia",
-    "156": "Cina",
-    "392": "Giappone"
-};
+const HEX_SIZE = 10;
 
-function getName(c) {
-    return COUNTRY_NAMES[c.id] || `Nazione ${c.id}`;
-}
-
-function colorFor(id) {
+// COLORI NAZIONE
+function nationColor(id) {
     let h = 0;
     for (let i = 0; i < id.length; i++) {
         h = id.charCodeAt(i) + ((h << 5) - h);
     }
-    return `hsl(${h % 360},60%,50%)`;
+    return `hsl(${h % 360},60%,45%)`;
 }
 
-// ---- CARICAMENTO MAPPA ----
+// === LOAD WORLD ===
 fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
 .then(r => r.json())
 .then(world => {
     countries = topojson.feature(world, world.objects.countries).features;
 
-    // regioni interne (ASTRATTE)
-    countries.forEach(c => {
-        c.regions = [
-            { name: "Capitale", isCapital: true },
-            { name: "Regione Nord" },
-            { name: "Regione Sud" }
-        ];
-    });
-
     projection.fitSize(
         [canvas.width, canvas.height],
         { type: "FeatureCollection", features: countries }
     );
 
+    generateHexGrid();
+    assignHexesToCountries();
     draw();
+
+    info.textContent = "Mappa pronta – clicca un esagono";
 });
 
-// ---- DISEGNO ----
-function draw() {
-    ctx.save();
-    ctx.setTransform(1,0,0,1,0,0);
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+// === HEX GRID ===
+function generateHexGrid() {
+    hexes = [];
+    const w = canvas.width;
+    const h = canvas.height;
 
-    // mare
-    ctx.fillStyle = "#020617";
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.restore();
+    const dx = HEX_SIZE * Math.sqrt(3);
+    const dy = HEX_SIZE * 1.5;
 
-    countries.forEach(c => {
-        ctx.beginPath();
-        path(c);
-
-        ctx.fillStyle = colorFor(c.id);
-        ctx.fill();
-
-        ctx.strokeStyle = "#000";
-        ctx.lineWidth = 0.4;
-        ctx.stroke();
-
-        if (c === hovered) {
-            ctx.strokeStyle = "#ffffff";
-            ctx.lineWidth = 2;
-            ctx.stroke();
+    for (let y = -HEX_SIZE; y < h + HEX_SIZE; y += dy) {
+        for (let x = -HEX_SIZE; x < w + HEX_SIZE; x += dx) {
+            const offset = (Math.round(y / dy) % 2) * dx / 2;
+            hexes.push({
+                x: x + offset,
+                y,
+                country: null
+            });
         }
+    }
+}
 
-        if (c === selected) {
-            ctx.strokeStyle = "#facc15";
-            ctx.lineWidth = 3;
-            ctx.stroke();
+// === ASSIGN NATION ===
+function assignHexesToCountries() {
+    hexes.forEach(h => {
+        const lonLat = projection.invert([h.x, h.y]);
+        if (!lonLat) return;
+
+        for (let c of countries) {
+            if (d3.geoContains(c, lonLat)) {
+                h.country = c;
+                break;
+            }
         }
     });
 }
 
-// ---- INTERAZIONE ----
-canvas.addEventListener("mousemove", e => {
-    const [x,y] = [e.offsetX, e.offsetY];
-    hovered = null;
+// === DRAW ===
+function draw() {
+    ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+    ctx.clearRect(-offsetX/scale, -offsetY/scale, canvas.width/scale, canvas.height/scale);
 
-    for (let c of countries) {
-        ctx.beginPath();
-        path(c);
-        if (ctx.isPointInPath(x,y)) {
-            hovered = c;
-            label.textContent = getName(c);
+    // oceano
+    ctx.fillStyle = "#020617";
+    ctx.fillRect(-10000,-10000,20000,20000);
+
+    // hexes
+    hexes.forEach(h => {
+        drawHex(
+            h.x,
+            h.y,
+            HEX_SIZE,
+            h === selectedHex ? "#facc15" :
+            h.country ? nationColor(h.country.id) : "#0f172a"
+        );
+    });
+}
+
+// === HEX DRAW ===
+function drawHex(x, y, size, color) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+        const angle = Math.PI / 3 * i;
+        const px = x + size * Math.cos(angle);
+        const py = y + size * Math.sin(angle);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+}
+
+// === INTERACTION ===
+canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    scale *= e.deltaY < 0 ? 1.1 : 0.9;
+    scale = Math.max(0.4, Math.min(8, scale));
+    draw();
+});
+
+canvas.addEventListener("mousedown", e => {
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+});
+
+window.addEventListener("mouseup", () => dragging = false);
+
+window.addEventListener("mousemove", e => {
+    if (dragging) {
+        offsetX += e.clientX - lastX;
+        offsetY += e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        draw();
+    }
+});
+
+canvas.addEventListener("click", e => {
+    const mx = (e.offsetX - offsetX) / scale;
+    const my = (e.offsetY - offsetY) / scale;
+
+    selectedHex = null;
+    for (let h of hexes) {
+        if (Math.hypot(mx - h.x, my - h.y) < HEX_SIZE) {
+            selectedHex = h;
+            if (h.country) {
+                info.textContent = `Nazione: ${h.country.id}`;
+            } else {
+                info.textContent = "Oceano";
+            }
             break;
         }
     }
     draw();
-});
-
-canvas.addEventListener("click", () => {
-    if (hovered) {
-        selected = hovered;
-        label.textContent = `Selezionata: ${getName(selected)}`;
-        draw();
-    }
 });
 </script>
 
